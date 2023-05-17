@@ -166,8 +166,6 @@ def lookup_domain(domain_name):
 
     data, _ = sock.recvfrom(1024)
     response = DNSPacket.parse_dns_packet(data)
-    # BytesIO(data)
-    # print(decode_name(BytesIO(response.answers[0].data)))
     return ip_to_string(response.answers[0].data)
 
 def test_lookup():
