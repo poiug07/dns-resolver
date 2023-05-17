@@ -14,7 +14,7 @@ random.seed(2023)
 class DNSHeader:
     id: int
     flags: int
-    num_quesions: int = 0
+    num_questions: int = 0
     num_answers: int = 0
     num_authorities: int = 0
     num_additionals: int = 0
@@ -38,9 +38,11 @@ def decode_name_simple(reader):
 
 def decode_name(reader):
     parts = []
-    while(length := reader.read(1)[0]) != 0:
+    while (length := reader.read(1)[0]) != 0:
         if length & 0b1100_0000:
             parts.append(decode_compressed_name(length, reader))
+            # compressed name is never followed by another label, so we return after decompressing.
+            break
         else:
             parts.append(reader.read(length))
     return b".".join(parts)
@@ -49,7 +51,6 @@ def decode_compressed_name(length, reader):
     """
     Decodes compressed name which is the one starting with 11 bits.
     It points to some other part of query, then we come back to the current position.
-    Compressed name is never followed by another label, so we return after decompressing.
     """
     pointer_bytes = bytes([length & 0b0011_1111]) + reader.read(1)
     pointer = struct.unpack("!H", pointer_bytes)[0]
@@ -100,6 +101,17 @@ class DNSPacket:
     authorities: List[DNSRecord]
     additionals: List[DNSRecord]
 
+    @staticmethod
+    def parse_dns_packet(data):
+        reader = BytesIO(data)
+        header = DNSHeader.parse_header(reader)
+        questions = [DNSQuestion.parse_question(reader) for _ in range(header.num_questions)]
+        answers = [DNSRecord.parse_record(reader) for _ in range(header.num_answers)]
+        authorities = [DNSRecord.parse_record(reader) for _ in range(header.num_authorities)]
+        additionals = [DNSRecord.parse_record(reader) for _ in range(header.num_additionals)]
+
+        return DNSPacket(header, questions, answers, authorities, additionals)
+
 def encode_dns_name(domain_name: str) -> bytes:
     """
     Encode domain name with length prepended for each part.
@@ -121,9 +133,12 @@ def build_query(domain_name, record_type):
     id = random.randint(0, 65535)
     # 9th bit from the left in the flags field.
     RECURSION_DESIRED = 1 << 8
-    header = DNSHeader(id=id, num_quesions=1, flags=RECURSION_DESIRED)
+    header = DNSHeader(id=id, num_questions=1, flags=RECURSION_DESIRED)
     question = DNSQuestion(name=name, type_=record_type, class_=CLASS_IN)
     return header.to_bytes() + question.to_bytes()
+
+def ip_to_string(ip):
+    return ".".join([str(x) for x in ip])
 
 def test_query():
     query = build_query("www.example.com", TYPE_A)
@@ -144,5 +159,24 @@ def test_query():
     record = DNSRecord.parse_record(reader)
     print(record)
 
+def lookup_domain(domain_name):
+    query = build_query(domain_name, TYPE_A)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.sendto(query, ("8.8.8.8", 53))
+
+    data, _ = sock.recvfrom(1024)
+    response = DNSPacket.parse_dns_packet(data)
+    # BytesIO(data)
+    # print(decode_name(BytesIO(response.answers[0].data)))
+    return ip_to_string(response.answers[0].data)
+
+def test_lookup():
+    print(lookup_domain("www.example.com"))
+    print(lookup_domain("google.com"))
+    print(lookup_domain("cityu.edu.hk"))
+    # TODO: resolve CNAMEs
+    print(lookup_domain("www.facebook.com"))
+    print(lookup_domain("www.metafilter.com"))
+
 if __name__=="__main__":
-    test_query()
+    test_lookup()
