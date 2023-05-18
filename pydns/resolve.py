@@ -90,7 +90,13 @@ class DNSRecord:
         # type(2), class(2), ttl(4), datalength(2) together are 10 bytes
         data = reader.read(10)
         type_, class_, ttl, data_len = struct.unpack("!HHIH", data)
-        data = reader.read(data_len)
+
+        if type_==TYPE_NS:
+            data = decode_name(reader)
+        elif type_==TYPE_A:
+            data = ip_to_string(reader.read(data_len))
+        else:
+            data = reader.read(data_len)
         return DNSRecord(name, type_, class_, ttl, data)
 
 @dataclass
@@ -123,16 +129,18 @@ def encode_dns_name(domain_name: str) -> bytes:
     return encoded + b"\x00"
 
 TYPE_A = 1
+TYPE_NS = 2
+
 CLASS_IN = 1
 
-def build_query(domain_name, record_type):
+def build_query(domain_name, record_type, recursion = False):
     """
     Builds a DNS query.
     """
     name = encode_dns_name(domain_name)
     id = random.randint(0, 65535)
     # 9th bit from the left in the flags field.
-    RECURSION_DESIRED = 1 << 8
+    RECURSION_DESIRED = (recursion & 1) << 8
     header = DNSHeader(id=id, num_questions=1, flags=RECURSION_DESIRED)
     question = DNSQuestion(name=name, type_=record_type, class_=CLASS_IN)
     return header.to_bytes() + question.to_bytes()
@@ -141,7 +149,7 @@ def ip_to_string(ip):
     return ".".join([str(x) for x in ip])
 
 def test_query():
-    query = build_query("www.example.com", TYPE_A)
+    query = build_query("www.example.com", TYPE_A, recursion=True)
     # remove Random id when asserting
     assert query.hex()[4:]=='0100000100000000000003777777076578616d706c6503636f6d0000010001'
     
@@ -160,7 +168,7 @@ def test_query():
     print(record)
 
 def lookup_domain(domain_name):
-    query = build_query(domain_name, TYPE_A)
+    query = build_query(domain_name, TYPE_A, recursion=True)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.sendto(query, ("8.8.8.8", 53))
 
@@ -176,5 +184,29 @@ def test_lookup():
     print(lookup_domain("www.facebook.com"))
     print(lookup_domain("www.metafilter.com"))
 
+def send_query(ip_address, domain_name, record_type):
+    query = build_query(domain_name, record_type)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.sendto(query, (ip_address, 53))
+
+    data, _ = sock.recvfrom(1024)
+    return DNSPacket.parse_dns_packet(data)
+
+def test_query_root_ns():
+    domain = "google.com"
+
+    # 198.41.0.4 is ip address of one of the root name servers.
+    # Real DNS resolves also hardcode the IP addresses of the root nameserver.
+    response = send_query("198.41.0.4", domain, TYPE_A)
+    # print(response.answers)
+    # print(response.authorities)
+    # print(response.additionals)
+    response = send_query(response.additionals[2].data, domain, TYPE_A)
+    print(response)
+    response = send_query(response.additionals[1].data, domain, TYPE_A)
+    print(response)
+
 if __name__=="__main__":
-    test_lookup()
+    # test_query()
+    # test_lookup()
+    test_query_root_ns()
