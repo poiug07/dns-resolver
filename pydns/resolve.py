@@ -206,7 +206,67 @@ def test_query_root_ns():
     response = send_query(response.additionals[1].data, domain, TYPE_A)
     print(response)
 
+def get_answer(packet):
+    # Return the first A record in the answer field
+    for x in packet.answers:
+        if x.type_==TYPE_A:
+            return x.data
+
+def get_nameserver_ip(packet):
+    # return the first A record in the additional field
+    for x in packet.additionals:
+        if x.type_==TYPE_A:
+            return x.data
+
+def resolve_wrong(domain_name, record_type):
+    # This version encounters error when resolving,
+    # DNS when data is not provided in additionals
+    nameserver = "198.41.0.4"
+    while True:
+        print(f"Querying {nameserver} for {domain_name}...")
+        response = send_query(nameserver, domain_name, record_type)
+        if ip := get_answer(response):
+            return ip
+        elif nsIP := get_nameserver_ip(response):
+            nameserver = nsIP
+        else:
+            raise Exception("something went wrong")
+
+def get_nameserver(packet):
+    # return the first NS record in the authority field
+    for x in packet.authorities:
+        if x.type_ == TYPE_NS:
+            return x.data.decode('utf-8')
+
+def resolve(domain_name, record_type):
+    MAXDEPTH = 100
+    nameserver = "198.41.0.4"
+    i = 0
+    while i<MAXDEPTH:
+        print(f"Querying {nameserver} for {domain_name}...")
+        response = send_query(nameserver, domain_name, record_type)
+        print(f"Got response {response}")
+        if ip := get_answer(response):
+            return ip
+        elif nsIP := get_nameserver_ip(response):
+            nameserver = nsIP
+        elif ns_domain := get_nameserver(response):
+            nameserver = resolve(ns_domain, TYPE_NS)
+        else:
+            print(response)
+            raise Exception("something went wrong")
+        i += 1
+    raise RecursionError("maximum recursion iteration reached")
+
+def test_resolve():
+    # twitter actually fails because of RECORD TYPE=6
+    #print(resolve("twitter.com", TYPE_A))
+    print(resolve("google.com", TYPE_A))
+    # Unable to resolve my uni's site because of unknown problem on query send.
+    # print(resolve("cityu.edu.hk", TYPE_A))
+
 if __name__=="__main__":
     # test_query()
     # test_lookup()
-    test_query_root_ns()
+    # test_query_root_ns()
+    test_resolve()
