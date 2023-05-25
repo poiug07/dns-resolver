@@ -5,6 +5,7 @@ import random
 import socket
 from io import BytesIO
 from typing import List
+from functools import lru_cache
 
 random.seed(2023)
 
@@ -245,6 +246,7 @@ def get_cname(packet):
         if x.type_==TYPE_CNAME:
             return x.data.decode('utf-8')
 
+@lru_cache(maxsize=512)
 def resolve(domain_name, record_type):
     MAXDEPTH = 100
     nameserver = "198.41.0.4"
