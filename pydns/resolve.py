@@ -91,7 +91,7 @@ class DNSRecord:
         data = reader.read(10)
         type_, class_, ttl, data_len = struct.unpack("!HHIH", data)
 
-        if type_==TYPE_NS:
+        if type_==TYPE_NS or type_==TYPE_CNAME:
             data = decode_name(reader)
         elif type_==TYPE_A:
             data = ip_to_string(reader.read(data_len))
@@ -130,6 +130,7 @@ def encode_dns_name(domain_name: str) -> bytes:
 
 TYPE_A = 1
 TYPE_NS = 2
+TYPE_CNAME = 5
 
 CLASS_IN = 1
 
@@ -238,6 +239,12 @@ def get_nameserver(packet):
         if x.type_ == TYPE_NS:
             return x.data.decode('utf-8')
 
+def get_cname(packet):
+    # Return the first CNAME record in the answer field
+    for x in packet.answers:
+        if x.type_==TYPE_CNAME:
+            return x.data.decode('utf-8')
+
 def resolve(domain_name, record_type):
     MAXDEPTH = 100
     nameserver = "198.41.0.4"
@@ -252,6 +259,8 @@ def resolve(domain_name, record_type):
             nameserver = nsIP
         elif ns_domain := get_nameserver(response):
             nameserver = resolve(ns_domain, TYPE_NS)
+        elif cname := get_cname(response):
+            return resolve(cname, TYPE_A)
         else:
             print(response)
             raise Exception("something went wrong")
@@ -265,8 +274,12 @@ def test_resolve():
     # Unable to resolve my uni's site because of unknown problem on query send.
     # print(resolve("cityu.edu.hk", TYPE_A))
 
+def test_cname():
+    print(resolve("www.facebook.com", TYPE_A))
+
 if __name__=="__main__":
     # test_query()
     # test_lookup()
     # test_query_root_ns()
-    test_resolve()
+    # test_resolve()
+    test_cname()
